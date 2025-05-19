@@ -8,3 +8,6 @@ soundfile
 librosa
 # Transformers from main branch (GitHub)
 git+https://github.com/huggingface/transformers.git@main
+fastapi
+uvicorn[standard]
+websockets
