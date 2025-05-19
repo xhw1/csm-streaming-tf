@@ -250,6 +250,33 @@ The code automatically calculates and displays Real-Time Factor (RTF) metrics:
 
 The streaming implementation provides these metrics for each chunk and overall generation.
 
+## FastAPI WebSocket Server
+
+This repository also includes a lightweight server built with **FastAPI**. The
+server exposes a `/ws` WebSocket endpoint that accepts a JSON payload
+containing:
+
+```json
+{
+  "audio": "<base64 wav>",
+  "transcript": "text the user spoke",
+  "response_text": "LLM generated reply"
+}
+```
+
+The server feeds the provided transcript and audio to the model along with the
+`response_text` to synthesize speech. Partial audio chunks are streamed back to
+the client, each encoded in base64. A final message with `{"status": "complete"}`
+is sent once generation finishes.
+
+Run the server locally with:
+
+```bash
+uvicorn server:app --reload
+```
+
+You can also build a Docker image using the included `Dockerfile`.
+
 ## FAQ
 
 **How much faster is the streaming version?**
