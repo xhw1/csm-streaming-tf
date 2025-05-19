@@ -1,20 +1,59 @@
 import asyncio
 import base64
 import io
+import os
+import tempfile
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 import numpy as np
 import soundfile as sf
+import openai
 
 from generator import load_csm_1b
 
 app = FastAPI()
 
+# Serve the frontend files
+app.mount("/static", StaticFiles(directory="frontend"), name="static")
+
+
+@app.get("/")
+async def index():
+    """Return the main web interface."""
+    return FileResponse("frontend/index.html")
+
 generator = None
+openai_client = openai.AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+chat_history = []
 
 @app.on_event("startup")
 def startup_event():
     global generator
     generator = load_csm_1b()
+
+
+async def transcribe_audio(audio_bytes: bytes) -> str:
+    """Send audio to gpt-4o-mini-transcribe and return the transcript."""
+    with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
+        tmp.write(audio_bytes)
+        tmp.flush()
+        response = await openai_client.audio.transcriptions.create(
+            model="gpt-4o-mini-transcribe",
+            file=open(tmp.name, "rb"),
+            response_format="text",
+        )
+    return response
+
+
+async def get_chat_response(history) -> str:
+    """Get assistant response from gpt-4o-mini using the chat history."""
+    completion = await openai_client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=history,
+    )
+    return completion.choices[0].message.content
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -23,14 +62,24 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             data = await websocket.receive_json()
             audio_b64 = data.get("audio")
-            transcript = data.get("transcript")
-            response_text = data.get("response_text")
 
-            if not all([audio_b64, transcript, response_text]):
-                await websocket.send_json({"error": "Missing fields"})
+            if not audio_b64:
+                await websocket.send_json({"error": "Missing audio"})
                 continue
 
             audio_bytes = base64.b64decode(audio_b64)
+
+            # Get transcript using gpt-4o-mini-transcribe
+            transcript = await transcribe_audio(audio_bytes)
+
+            # Update history and get assistant response
+            chat_history.append({"role": "user", "content": transcript})
+            if len(chat_history) > 20:
+                chat_history.pop(0)
+            response_text = await get_chat_response(chat_history)
+            chat_history.append({"role": "assistant", "content": response_text})
+            if len(chat_history) > 20:
+                chat_history.pop(0)
             audio_array, sr = sf.read(io.BytesIO(audio_bytes))
             if sr != 24000:
                 import librosa
