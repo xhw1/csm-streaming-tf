@@ -5,6 +5,8 @@ import os
 import tempfile
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 import numpy as np
 import soundfile as sf
 import openai
@@ -12,6 +14,15 @@ import openai
 from generator import load_csm_1b
 
 app = FastAPI()
+
+# Serve the frontend files
+app.mount("/static", StaticFiles(directory="frontend"), name="static")
+
+
+@app.get("/")
+async def index():
+    """Return the main web interface."""
+    return FileResponse("frontend/index.html")
 
 generator = None
 openai_client = openai.AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
