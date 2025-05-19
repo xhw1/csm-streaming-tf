@@ -10,3 +10,4 @@ git+https://github.com/huggingface/transformers.git@main
 fastapi
 uvicorn[standard]
 websockets
+openai

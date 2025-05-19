@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>CSM Streaming Demo</title>
+</head>
+<body>
+    <h1>CSM Streaming Demo</h1>
+    <button id="ptt">Hold to Talk</button>
+    <script>
+        const ws = new WebSocket("ws://localhost:8000/ws");
+        let mediaRecorder;
+        let audioChunks = [];
+        const button = document.getElementById("ptt");
+        button.addEventListener("mousedown", startRecording);
+        button.addEventListener("touchstart", startRecording);
+        button.addEventListener("mouseup", stopRecording);
+        button.addEventListener("mouseleave", stopRecording);
+        button.addEventListener("touchend", stopRecording);
+
+        async function startRecording() {
+            if (mediaRecorder) return;
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            audioChunks = [];
+            mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+            mediaRecorder.onstop = e => {
+                const blob = new Blob(audioChunks, { type: 'audio/wav' });
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const b64 = reader.result.split(',')[1];
+                    ws.send(JSON.stringify({ audio: b64 }));
+                };
+                reader.readAsDataURL(blob);
+                mediaRecorder = null;
+            };
+            mediaRecorder.start();
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+        }
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        ws.onmessage = async event => {
+            const data = JSON.parse(event.data);
+            if (data.audio_chunk) {
+                const response = await fetch('data:audio/wav;base64,' + data.audio_chunk);
+                const arrayBuffer = await response.arrayBuffer();
+                const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                const source = audioCtx.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioCtx.destination);
+                source.start();
+            }
+        };
+    </script>
+</body>
+</html>
