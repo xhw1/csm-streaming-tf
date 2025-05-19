@@ -1,10 +1,7 @@
 import os
 import time
 import numpy as np
-import sounddevice as sd
 import soundfile as sf
-import queue
-import threading
 from generator import (
     load_csm_1b,
     generate_streaming_audio,
@@ -75,7 +72,6 @@ def test_streaming_audio_helper(generator, prompt):
         generator,
         prompt,
         output_filename=output_file,
-        play_audio=True,  # Real-time playback
         chunk_token_size=20
     )
     
@@ -92,7 +88,7 @@ def test_streaming_audio_helper(generator, prompt):
         print("No audio was generated")
         return None
 
-def test_with_reference_audio(generator, reference_data, prompt, audio_queue=None):
+def test_with_reference_audio(generator, reference_data, prompt):
     """Test generation with reference audio for voice cloning"""
     print("\n" + "="*50)
     print("Testing generation with reference audio...")
@@ -130,22 +126,18 @@ def test_with_reference_audio(generator, reference_data, prompt, audio_queue=Non
     
     # Stream generation
     chunks = []
-    
+
     # Open WAV file for writing
     with sf.SoundFile(output_file, "w", samplerate=24000, channels=1, subtype="PCM_16") as wav_fh:
-        # Stream generation and queue chunks as they arrive
+        # Stream generation and save chunks as they arrive
         for pcm_chunk in generator.generate_stream(inputs, chunk_token_size=20):
             # Convert to numpy
             np_chunk = pcm_chunk.cpu().numpy()
             chunks.append(np_chunk)
-            
-            # Add to playback queue if provided
-            if audio_queue is not None:
-                audio_queue.put(np_chunk)
-            
+
             # Save to file
             wav_fh.write(np_chunk)
-            
+
             # Print progress indicator
             print(".", end="", flush=True)
     
@@ -192,24 +184,6 @@ def generate_streaming_audio_with_reference(generator, reference_data, prompt, o
         return_dict=True
     ).to(generator.device)
     
-    # Create audio queue if needed for real-time playback
-    audio_queue = None
-    playback_thread = None
-    if play_audio:
-        audio_queue = queue.Queue()
-        
-        def audio_playback_thread():
-            while True:
-                chunk = audio_queue.get()
-                if chunk is None:  # None is our signal to stop
-                    break
-                sd.play(chunk.astype("float32"), 24000)
-                sd.wait()
-                audio_queue.task_done()
-        
-        playback_thread = threading.Thread(target=audio_playback_thread)
-        playback_thread.daemon = True
-        playback_thread.start()
     
     # Stream generation with chunk collection
     chunks = []
@@ -226,11 +200,7 @@ def generate_streaming_audio_with_reference(generator, reference_data, prompt, o
             # Convert to numpy
             np_chunk = pcm_chunk.cpu().numpy()
             chunks.append(np_chunk)
-            
-            # Add to playback queue if requested
-            if audio_queue is not None:
-                audio_queue.put(np_chunk)
-            
+
             # Save to file if requested
             if wav_file is not None:
                 wav_file.write(np_chunk)
@@ -244,10 +214,7 @@ def generate_streaming_audio_with_reference(generator, reference_data, prompt, o
             wav_file.close()
             print(f"\nSaved audio to {output_filename}")
         
-        # Stop playback thread if it exists
-        if playback_thread is not None:
-            audio_queue.put(None)
-            playback_thread.join()
+
     
     # Concatenate chunks
     if chunks:
@@ -276,22 +243,7 @@ def main():
         }
     ]
     
-    # Create audio queue and playback thread for real-time audio
-    audio_queue = queue.Queue()
-    
-    def audio_playback_thread():
-        while True:
-            chunk = audio_queue.get()
-            if chunk is None:  # None is our signal to stop
-                break
-            sd.play(chunk.astype("float32"), 24000)
-            sd.wait()  # Wait here is fine as it's in a separate thread
-            audio_queue.task_done()
-    
-    # Start playback thread
-    playback_thread = threading.Thread(target=audio_playback_thread)
-    playback_thread.daemon = True
-    playback_thread.start()
+
     
     try:
         # Step 1: Load generator directly from HuggingFace
@@ -307,15 +259,8 @@ def main():
         helper_audio = test_streaming_audio_helper(generator, test_prompt)
         
         # Step 5: Test with reference audio
-        ref_audio = test_with_reference_audio(generator, refs, test_prompt, audio_queue)
-                
-        # Wait for all audio to finish playing
-        audio_queue.join()
-        
-        # Signal playback thread to stop
-        audio_queue.put(None)
-        playback_thread.join()
-        
+        ref_audio = test_with_reference_audio(generator, refs, test_prompt)
+
         print("\n" + "="*50)
         print("All tests completed successfully!")
         print("="*50)
@@ -325,9 +270,7 @@ def main():
         import traceback
         traceback.print_exc()
     finally:
-        # Make sure we always try to stop the playback thread
-        if playback_thread.is_alive():
-            audio_queue.put(None)
+        pass
 
 if __name__ == "__main__":
     main()
