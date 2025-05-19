@@ -1,13 +1,10 @@
 import os
-import queue
-import threading
 import time
 from typing import Generator as PyGenerator, Optional
 
 import numpy as np
 import torch
 import torchaudio
-import sounddevice as sd
 import soundfile as sf
 
 from transformers import CsmForConditionalGeneration, AutoProcessor
@@ -392,7 +389,7 @@ def generate_streaming_audio(
     generator,
     conversation,
     output_filename=None,
-    play_audio=True,
+    play_audio=False,
     chunk_token_size=20,
     reference_data=None,
     **kwargs
@@ -409,7 +406,7 @@ def generate_streaming_audio(
     output_filename : str, optional
         Filename to save the generated audio to, by default None
     play_audio : bool, optional
-        Whether to play the audio in real time, by default True
+        Deprecated. Audio playback is no longer supported. Default is False.
     chunk_token_size : int, optional
         Number of tokens to generate before yielding an audio chunk, by default 20
     reference_data : list, optional
@@ -422,24 +419,8 @@ def generate_streaming_audio(
     numpy.ndarray
         The complete generated audio
     """
-    # Set up audio queue and threading if playing audio
-    audio_queue = queue.Queue()
+    # Collect generated chunks
     complete_audio = []
-    
-    if play_audio:
-        def audio_playback_thread():
-            while True:
-                chunk = audio_queue.get()
-                if chunk is None:  # None is our signal to stop
-                    break
-                sd.play(chunk.astype("float32"), 24000)
-                sd.wait()  # Wait here is fine as it's in a separate thread
-                audio_queue.task_done()
-        
-        # Start playback thread
-        playback_thread = threading.Thread(target=audio_playback_thread)
-        playback_thread.daemon = True
-        playback_thread.start()
     
     try:
         # Process the conversation
@@ -520,11 +501,7 @@ def generate_streaming_audio(
             # Convert to numpy and ensure correct dtype
             np_chunk = pcm_chunk.cpu().numpy().astype(np.float32)
             complete_audio.append(np_chunk)
-            
-            # Add to queue if playing
-            if play_audio:
-                audio_queue.put(np_chunk)
-            
+
             # Save to file if provided
             if wav_fh:
                 wav_fh.write(np_chunk)
@@ -536,12 +513,6 @@ def generate_streaming_audio(
         if wav_fh:
             wav_fh.close()
             print(f"\nSaved to '{output_filename}'")
-        
-        # Wait for playback to finish if playing
-        if play_audio:
-            audio_queue.join()
-            audio_queue.put(None)  # Signal to stop the thread
-            playback_thread.join()
         
         # Concatenate all chunks
         if complete_audio:
@@ -556,10 +527,6 @@ def generate_streaming_audio(
         print(f"Error during generation: {e}")
         import traceback
         traceback.print_exc()
-        
-        # Clean up
-        if play_audio and 'playback_thread' in locals() and playback_thread.is_alive():
-            audio_queue.put(None)
         
         return None
 
