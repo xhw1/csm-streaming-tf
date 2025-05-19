@@ -7,7 +7,7 @@
 <body>
     <h1>CSM Streaming Demo</h1>
     <button id="ptt">Hold to Talk</button>
-    <script>
+    <script type="module">
         const ws = new WebSocket("ws://localhost:8000/ws");
         let mediaRecorder;
         let audioChunks = [];
@@ -44,16 +44,17 @@
         }
 
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        await audioCtx.audioWorklet.addModule('audio-worklet.js');
+        const playerNode = new AudioWorkletNode(audioCtx, 'audio-queue-processor');
+        playerNode.connect(audioCtx.destination);
+
         ws.onmessage = async event => {
             const data = JSON.parse(event.data);
             if (data.audio_chunk) {
                 const response = await fetch('data:audio/wav;base64,' + data.audio_chunk);
                 const arrayBuffer = await response.arrayBuffer();
                 const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-                const source = audioCtx.createBufferSource();
-                source.buffer = audioBuffer;
-                source.connect(audioCtx.destination);
-                source.start();
+                playerNode.port.postMessage(audioBuffer.getChannelData(0));
             }
         };
     </script>
